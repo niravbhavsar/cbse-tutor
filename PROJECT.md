@@ -664,3 +664,61 @@ The app is **done** when all of these are true:
 ---
 
 **End of documentation. Hand this file to GitHub Copilot with the instruction: "Implement Phase 0 first. Follow Section 8 (Data-Safety Rules) exactly. Do not introduce any framework or build step."**
+
+---
+
+## 20. Pending Before Deployment (do these on the personal laptop)
+
+> Status as of 12 Nov 2026: Phases 0–6 are implemented and pushed (commits `c3b274d`, `f103b51`, `c85d967`).
+> They were tested locally with Wrangler + a headless browser using **mocked AI** (`AI_MOCK=1`).
+> Nothing has been deployed to Cloudflare yet. Tick each box as you go.
+
+### 20.1 One-time account & tooling
+- [ ] Install Node.js 20+ and Wrangler: `npm install -g wrangler` (CLI only — the app has no build step)
+- [ ] `wrangler login` (opens the browser, sign in to your Cloudflare account)
+- [ ] `git pull` in your local clone so you have the latest `main`
+
+### 20.2 D1 database (required)
+- [ ] `wrangler d1 create app-db`
+- [ ] Copy the printed `database_id` into **both** files, replacing `REPLACE_WITH_D1_DATABASE_ID`:
+  - `wrangler.toml`
+  - `backup-worker/wrangler.toml`
+- [ ] Commit and push that change (`git commit -am "Set D1 database id"` then `git push`)
+- [ ] Apply the schema to production: `wrangler d1 execute app-db --remote --file=schema.sql`
+- [ ] Only if a D1 database was already created back in Phase 0: `wrangler d1 execute app-db --remote --file=migrations/0001_phase1_additions.sql` (a "duplicate column" error means it was already applied — fine)
+- [ ] Check: `wrangler d1 execute app-db --remote --command="SELECT name FROM sqlite_master WHERE type='table'"` lists 7 tables: users, sessions, books, chapters, quiz_cache, progress, attempts
+
+### 20.3 Cloudflare Pages project (required)
+- [ ] Dashboard → Workers & Pages → Create → Pages → **Connect to Git** → choose `niravbhavsar/cbse-tutor`, branch `main`
+- [ ] Framework preset: **None** · Build command: **(empty)** · Build output directory: **`.`**
+- [ ] After the first deploy, open Settings → Bindings and confirm **D1 `DB` → app-db** and **Workers AI `AI`** are present (they come from `wrangler.toml`; add them by hand if missing, then redeploy)
+- [ ] Make sure `AI_MOCK` is **not** set in production variables (it is only for local testing)
+- [ ] Optional variables: `REVISION_DAYS` (default 3), `AI_TEXT_MODEL`, `AI_VISION_MODEL`
+
+### 20.4 R2 weekly backup (optional — needs a card/PayPal on the Cloudflare account)
+- [ ] Decide whether to enable R2. Skipping it is OK: JSON export/import and D1 Time Travel (30 days) still protect the data.
+- [ ] If enabling: add a payment method, then `wrangler r2 bucket create cbse-tutor-backup`
+- [ ] Uncomment the `[[r2_buckets]]` block in `wrangler.toml` (enables the "Back up to R2 now" button), commit and push
+- [ ] `cd backup-worker && wrangler deploy` (cron: Sunday 20:00 UTC = Monday 01:30 IST)
+- [ ] Optional manual trigger: `wrangler secret put BACKUP_TOKEN`, then call the worker URL with `?run=1` and header `x-backup-token`
+
+### 20.5 First run on the live site
+- [ ] Open `https://<project>.pages.dev` — the status panel shows three green dots; `/api/ping` returns `"missing": []`
+- [ ] Sign up the **parent** first (the first account always becomes the parent)
+- [ ] Parent page → **+ Add any missing NCERT books** (seeds Santoor, Maths Mela, Our Wondrous World, Veena)
+- [ ] Add the child account(s) from the parent page
+
+### 20.6 Things never tested against real Cloudflare (verify these)
+- [ ] **Real Workers AI quiz generation** on one chapter: are the questions sensible, Grade-4 level, and correctly formatted? (Local tests used canned answers.)
+- [ ] **Real Workers AI learning content**: mind map draws (or falls back to an outline), practical activity and matching game look right
+- [ ] **Vision OCR fallback** (Llama 3.2 Vision): the first call auto-sends the licence "agree"; check one book capture where Tesseract fails
+- [ ] Workers AI free daily quota is enough for your usage (watch Dashboard → AI → usage after generating a few chapters)
+- [ ] Login works over HTTPS on a phone and stays logged in; logging out on one device does not log out the other
+- [ ] Service worker installs on the live HTTPS site and pages open offline (airplane mode) with the last saved data
+- [ ] Run the full Section 14 checklist and the README "Verification checklist"
+
+### 20.7 Known gaps / decisions to revisit later
+- NCERT-API / Oriz-PDF automatic chapter import is **not implemented** (no stable free source); chapter text comes from photos (OCR) or typing/pasting.
+- Every file in the repo root is publicly readable on the site (e.g. `PROJECT.md`, `schema.sql`); none contain secrets — keep it that way.
+- Tailwind is loaded from its CDN (prints a "not for production" console warning). It works, but can be replaced with a small hand-written CSS later.
+- After changing `app.js`, `style.css` or any HTML, bump `VERSION` in `sw.js` so phones pick up the update quickly.
