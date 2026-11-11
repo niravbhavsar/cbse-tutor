@@ -1,0 +1,666 @@
+# 📘 CBSE Personal Tutor App — Complete Implementation Documentation
+
+> **For GitHub Copilot / AI-assisted development**
+> This document is the single source of truth for building the app. Follow phases in order. Each phase has a clear deliverable. Do not skip the data-safety rules in Section 8 — they are non-negotiable.
+
+---
+
+## 1. Project Overview
+
+**What it is:** A free, plain HTML/CSS/JS web application deployed on Cloudflare, where a parent captures a textbook page **exactly once**, and their child learns through visuals, hands-on activities, games, and tests. Data is stored server-side so nothing is ever lost across devices.
+
+**Target user:** One family (parent + one child), starting with **CBSE Grade 4 in India**, but architected to scale to all grades.
+
+**Core principle:** *Capture once, reuse forever. Cloudflare D1 is the single source of truth.*
+
+---
+
+## 2. Hard Constraints (Do Not Violate)
+
+| Constraint | Rule |
+|---|---|
+| **Framework** | ❌ No React, Vue, Svelte, Angular, or any JS framework. **Plain HTML + vanilla JS only.** |
+| **Build step** | ❌ No bundler, no npm build. Files are served as-is. |
+| **Cost** | ❌ No paid services. No credit card anywhere. |
+| **Hosting** | ✅ Cloudflare Pages only |
+| **Database** | ✅ Cloudflare D1 only (no external DB) |
+| **Auth** | ✅ Server-side sessions via HttpOnly cookies (no client-side "loggedIn" flags) |
+| **Data loss** | ❌ Data must **never** live only in browser storage. D1 is authoritative. |
+| **URLs** | ✅ All API calls must use relative paths (`/api/...`). **Never hardcode `localhost:8787`.** |
+| **Local dev vs prod** | Use `wrangler dev --remote` when testing real data. Local `wrangler dev` uses a separate sandbox D1. |
+
+---
+
+## 3. Tech Stack
+
+| Layer | Choice | Free Tier | Purpose |
+|---|---|---|---|
+| Hosting | **Cloudflare Pages** | Unlimited static | Serve `index.html`, `app.js`, `style.css` |
+| API | **Cloudflare Pages Functions** (`/functions/api/*.js`) | 100K req/day | Backend endpoints |
+| Database | **Cloudflare D1** (SQLite) | 5 GB, 5M rows/day | Single source of truth |
+| AI | **Cloudflare Workers AI** (Llama 3.x) | 10K Neurons/day | Question generation, learning content |
+| OCR #1 | **Tesseract.js** (CDN) | Unlimited, on-device | Fast, private, offline |
+| OCR #2 | **Puter.js `img2txt`** | Unlimited | Complex layouts, handwriting |
+| OCR #3 | **Workers AI Vision** (Llama 3.2 Vision) | Falls under AI quota | Last resort |
+| Visuals | **Mermaid.js** (CDN) | Unlimited | AI text → flowchart/mind map |
+| Charts | **Chart.js** (CDN) | Unlimited | Progress dashboard |
+| CSS | **Tailwind CSS** (CDN) | Unlimited | UI styling |
+| Backup | **Cloudflare R2** | 10 GB | Weekly Cron export |
+| Fuzzy match | **`string-similarity`** (CDN) or inline | Unlimited | OCR → chapter matching |
+
+---
+
+## 4. Final Feature List
+
+### 4.1 Authentication & Roles
+- **Parent role:** Capture books, review/approve AI questions, toggle answer-key visibility, view child progress, export/import data.
+- **Child role:** Learn, play, and take tests. Answer keys hidden unless parent enables per chapter.
+- Both roles log in via email + password. Session stored as HttpOnly cookie issued by a Worker.
+
+### 4.2 Capture-Once Book & Chapter System
+- Parent photographs **front cover + index page** (one time per book).
+- OCR fallback chain runs automatically:
+  1. **Tesseract.js** (on-device) → if `text.length < 20`, next
+  2. **Puter.js `img2txt`** → if empty/garbled, next
+  3. **Workers AI Vision** (via `/api/ocr` Worker)
+- Result fuzzy-matched against seed `books.json`. Chapters extracted and saved **permanently in D1**.
+- Each chapter page captured **once**; full text saved to D1.
+- Parent can **manually correct** any misread chapter title.
+- **Lookup order on every access:** IndexedDB → D1 → camera. The camera only appears if both caches miss.
+
+### 4.3 Book Content Resolution (Fallback Chain)
+When a book is not in the seed:
+1. **Seed JSON** (`books.json`) — instant, most reliable
+2. **NCERT MCP REST API** — structured chapter lists + text
+3. **Oriz NCERT catalog → official `ncert.nic.in` PDFs** — parse client-side
+4. **OCR from parent's own photo** — final fallback
+
+### 4.4 Four Learning Modes per Chapter
+Tabs on the chapter page, in this order:
+
+| Mode | What the child sees | Implementation |
+|---|---|---|
+| 👁️ **Visual** | Mind map / flowchart of the concept | AI returns Mermaid code → render with `mermaid.render()` |
+| 🛠️ **Practical** | "Try this at home" activity card | AI generates text |
+| 🎲 **Fun** | Drag-and-drop matching game | AI returns `[{"left":"…","right":"…"}]` → reusable `renderMatchingGame(pairs)` |
+| 📝 **Test** | MCQ, fill-in-blank, true/false, short, long | AI → parent approval → stored in `quiz_cache` |
+
+### 4.5 Test System
+- Parent **previews and edits** every AI-generated question set before the child sees it.
+- Approved questions cached in `quiz_cache` — **do not re-call AI** unless parent clicks "Regenerate."
+- **Answer-key toggle** per chapter (parent-controlled, stored in `quiz_cache.answer_key_visible`).
+- Wrong answers logged in `progress.wrong_json` → **Revision Round** resurfaces them later.
+
+### 4.6 Progress Dashboard
+- Chapters completed per subject, scores over time, weak areas.
+- Parent view: full detail. Child view: simplified.
+- Chart.js renders the graphs.
+
+### 4.7 Multi-Grade Ready
+- Grade is a config field (`grade=4`). Seed data per grade. Same pipeline works for any grade without code changes.
+
+---
+
+## 5. Data Model (D1 Schema)
+
+Create `schema.sql` at project root and run:
+```bash
+wrangler d1 execute app-db --file=schema.sql
+```
+
+```sql
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  pass_hash TEXT NOT NULL,
+  role TEXT CHECK(role IN ('parent','child')) NOT NULL,
+  parent_id TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE sessions (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE books (
+  id TEXT PRIMARY KEY,
+  grade INTEGER NOT NULL,
+  subject TEXT NOT NULL,
+  title TEXT NOT NULL,
+  publisher TEXT,
+  fingerprint TEXT UNIQUE,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE chapters (
+  id TEXT PRIMARY KEY,
+  book_id TEXT NOT NULL,
+  chapter_no INTEGER,
+  title TEXT NOT NULL,
+  content_text TEXT,
+  content_hash TEXT,
+  source TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (book_id) REFERENCES books(id)
+);
+
+CREATE TABLE quiz_cache (
+  chapter_id TEXT PRIMARY KEY,
+  questions_json TEXT NOT NULL,
+  learning_json TEXT,
+  approved INTEGER DEFAULT 0,
+  answer_key_visible INTEGER DEFAULT 0,
+  generated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+);
+
+CREATE TABLE progress (
+  child_id TEXT NOT NULL,
+  chapter_id TEXT NOT NULL,
+  score INTEGER,
+  wrong_json TEXT,
+  updated_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (child_id, chapter_id),
+  FOREIGN KEY (child_id) REFERENCES users(id),
+  FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+);
+```
+
+---
+
+## 6. Project Structure
+
+```
+/
+├── index.html                  # Login screen
+├── parent.html                 # Parent dashboard
+├── child.html                  # Child dashboard
+├── chapter.html                # Chapter view (Visual | Practical | Fun | Test tabs)
+├── app.js                      # Shared JS (auth, API calls, cache, utils)
+├── style.css                   # Custom styles (beyond Tailwind)
+├── books.json                  # Seed chapter data for Grade 4
+├── schema.sql                  # D1 schema
+├── wrangler.toml               # Cloudflare config
+├── sw.js                       # (optional) service worker — static only
+└── functions/
+    └── api/
+        ├── _middleware.js      # Auth check for all /api/* routes
+        ├── ping.js             # GET /api/ping
+        ├── signup.js           # POST /api/signup
+        ├── login.js            # POST /api/login
+        ├── logout.js           # POST /api/logout
+        ├── books/
+        │   ├── index.js        # GET /api/books, POST /api/books
+        │   └── [id].js         # GET/PUT /api/books/:id
+        ├── chapters/
+        │   ├── index.js        # POST /api/chapters
+        │   └── [id].js         # GET/PUT /api/chapters/:id
+        ├── quiz/
+        │   ├── generate.js     # POST /api/quiz/generate
+        │   ├── approve.js      # POST /api/quiz/approve
+        │   └── [chapterId].js  # GET /api/quiz/:chapterId
+        ├── learning/
+        │   └── generate.js     # POST /api/learning/generate (visual/practical/fun)
+        ├── progress/
+        │   ├── submit.js       # POST /api/progress/submit
+        │   └── [childId].js    # GET /api/progress/:childId
+        ├── ocr.js              # POST /api/ocr (Workers AI Vision fallback)
+        └── backup.js           # POST /api/backup (manual trigger)
+```
+
+---
+
+## 7. API Endpoints (Contract)
+
+All endpoints return JSON. All except `/ping`, `/signup`, `/login` require a valid session cookie.
+
+| Method | Path | Purpose | Auth |
+|---|---|---|---|
+| GET | `/api/ping` | Health check | none |
+| POST | `/api/signup` | Create user | none |
+| POST | `/api/login` | Set session cookie | none |
+| POST | `/api/logout` | Clear cookie | any |
+| GET | `/api/books?fp=<hash>` | Lookup by fingerprint | any |
+| GET | `/api/books/:id` | Fetch book | any |
+| POST | `/api/books` | Save new book | parent |
+| GET | `/api/chapters/:id` | Fetch chapter | any |
+| POST | `/api/chapters` | Save chapter | parent |
+| PUT | `/api/chapters/:id` | Update chapter (with `updated_at` check) | parent |
+| POST | `/api/quiz/generate` | Generate questions for a chapter | parent |
+| POST | `/api/quiz/approve` | Approve/edit questions | parent |
+| GET | `/api/quiz/:chapterId` | Fetch approved quiz (child sees answers only if `answer_key_visible=1`) | any |
+| POST | `/api/learning/generate` | Generate visual/practical/fun content | parent |
+| POST | `/api/progress/submit` | Save test result | child |
+| GET | `/api/progress/:childId` | Fetch progress | parent or self |
+| POST | `/api/ocr` | Vision OCR fallback | parent |
+| POST | `/api/backup` | Manual D1 → R2 export | parent |
+
+---
+
+## 8. Data-Safety Rules (Non-Negotiable)
+
+These rules exist because past apps lost data. **Follow them exactly.**
+
+### 8.1 Write-Through Pattern (Server First, Cache Second)
+
+```js
+// ✅ CORRECT
+async function saveChapter(chapter) {
+  const res = await fetch('/api/chapters', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(chapter)
+  });
+  if (!res.ok) {
+    showToast('Not saved ✗', 'error');   // do NOT cache
+    throw new Error('Server save failed');
+  }
+  const saved = await res.json();
+  await idbPut('chapters', saved);       // cache only after 2xx
+  showToast('Saved ✓', 'success');
+  return saved;
+}
+
+// ❌ WRONG — never do this
+// localStorage.setItem('chapter', JSON.stringify(chapter));
+```
+
+### 8.2 Read Pattern (Cache-First Display, Server-First Truth)
+
+```js
+async function getChapter(id) {
+  const cached = await idbGet('chapters', id);
+  if (cached) render(cached);                     // instant paint
+
+  const fresh = await fetch(`/api/chapters/${id}`, { credentials: 'include' })
+                       .then(r => r.ok ? r.json() : null);
+  if (fresh) { await idbPut('chapters', fresh); render(fresh); }
+  // If offline, cached copy stays — nothing lost
+}
+```
+
+### 8.3 Mandatory Rules Checklist
+
+- [ ] Every user-generated write goes to `/api/*` → D1 **first**; IndexedDB only after `2xx`
+- [ ] All fetch calls use **relative URLs** (`/api/...`)
+- [ ] Auth is **server-side session** via HttpOnly cookie
+- [ ] Service worker (if used) caches **static assets only**; `/api/*` is network-first
+- [ ] Every table has `created_at` (and `updated_at` where mutable)
+- [ ] Updates use optimistic concurrency: `WHERE id=? AND updated_at=?`
+- [ ] Parent-only **Export/Import JSON** buttons
+- [ ] Weekly **Cron → R2** backup
+- [ ] Visible **"Saved ✓ / Not saved ✗"** toast on every write
+- [ ] Use `wrangler d1 execute --remote` when inspecting production data
+
+### 8.4 Local vs Production D1
+
+`wrangler dev` runs a **local SQLite sandbox** — separate from production D1. To test against real data:
+```bash
+wrangler dev --remote
+wrangler d1 execute app-db --remote --command="SELECT * FROM books"
+```
+
+---
+
+## 9. OCR Fallback Chain (Detailed)
+
+Implement in `app.js`:
+
+```js
+async function tryOCR(file) {
+  // Option 1: Tesseract.js (on-device)
+  try {
+    const { data } = await Tesseract.recognize(file, 'eng');
+    if (data.text.trim().length > 20) return { text: data.text, source: 'tesseract' };
+  } catch (e) { console.warn('Tesseract failed', e); }
+
+  // Option 2: Puter.js
+  try {
+    const url = await uploadToPuter(file);  // or data URL
+    const text = await puter.ai.img2txt(url);
+    if (text && text.trim().length > 20) return { text, source: 'puter' };
+  } catch (e) { console.warn('Puter failed', e); }
+
+  // Option 3: Workers AI Vision (via our own API)
+  try {
+    const base64 = await fileToBase64(file);
+    const res = await fetch('/api/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ image: base64 })
+    });
+    if (res.ok) {
+      const { text } = await res.json();
+      if (text && text.trim().length > 20) return { text, source: 'workers-ai' };
+    }
+  } catch (e) { console.warn('Workers AI OCR failed', e); }
+
+  throw new Error('All OCR options failed');
+}
+```
+
+---
+
+## 10. Book Content Fallback Chain (Detailed)
+
+```js
+async function resolveBook(ocrText, grade, subject) {
+  const normalized = ocrText.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  // Option 1: Seed data
+  const seed = await fetch('/books.json').then(r => r.json());
+  const seedMatch = fuzzyFindBestMatch(normalized, seed.map(b => b.title));
+  if (seedMatch.score > 0.7) {
+    const book = seed.find(b => b.title === seedMatch.target);
+    return { ...book, source: 'seed' };
+  }
+
+  // Option 2: NCERT MCP REST API
+  try {
+    const res = await fetch(`https://api.ncert.example/books/${grade}/${subject}/topics`);
+    if (res.ok) {
+      const chapters = await res.json();
+      return { grade, subject, title: subject, chapters, source: 'ncert-api' };
+    }
+  } catch (e) { /* fall through */ }
+
+  // Option 3: Oriz NCERT / direct PDF
+  try {
+    const catalog = await fetch('https://raw.githubusercontent.com/oriz-ncert/catalog/main/index.json').then(r => r.json());
+    const match = catalog.find(b => fuzzyMatch(normalized, b.title) > 0.7);
+    if (match) {
+      return { ...match, source: 'oriz-pdf' };
+    }
+  } catch (e) { /* fall through */ }
+
+  // Option 4: Manual entry by parent
+  return { grade, subject, title: normalized, chapters: [], source: 'manual' };
+}
+```
+
+---
+
+## 11. AI Prompt Templates
+
+Store prompts in `functions/api/_prompts.js`.
+
+### 11.1 Quiz Generation
+```
+You are a CBSE curriculum expert for Grade {grade}.
+Chapter: "{chapterTitle}"
+Chapter text: """{chapterText}"""
+
+Generate a quiz in STRICT JSON format only. No prose, no markdown fences.
+{
+  "mcq": [{"question": "...", "options": ["A","B","C","D"], "answer": "A", "explanation": "..."}],
+  "fill_blank": [{"question": "... ___ ...", "answer": "...", "explanation": "..."}],
+  "true_false": [{"statement": "...", "answer": true, "explanation": "..."}],
+  "short": [{"question": "...", "answer": "...", "explanation": "..."}],
+  "long": [{"question": "...", "answer": "...", "explanation": "..."}]
+}
+Rules:
+- Counts: 5 mcq, 3 fill_blank, 2 true_false, 2 short, 1 long.
+- Language: age-appropriate for Grade {grade}.
+- Stick strictly to the chapter text — do not invent facts.
+```
+
+### 11.2 Visual Learning
+```
+Generate a Mermaid.js mind map for this chapter.
+Return ONLY valid Mermaid syntax (start with "mindmap").
+Max 15 nodes. Use short labels suitable for a Grade {grade} child.
+Chapter: "{chapterTitle}"
+Content: """{chapterText}"""
+```
+
+### 11.3 Practical Learning
+```
+Suggest ONE hands-on "Try this at home" activity for a Grade {grade} child
+based on this chapter. Use materials found at home.
+Return JSON: {"title": "...", "materials": [...], "steps": [...], "learning": "..."}
+Chapter: "{chapterTitle}"
+Content: """{chapterText}"""
+```
+
+### 11.4 Fun Learning
+```
+Create 6 matching pairs (label ↔ definition/part) for a drag-and-drop game.
+Return JSON: [{"left": "...", "right": "..."}, ...]
+Age-appropriate for Grade {grade}.
+Chapter: "{chapterTitle}"
+Content: """{chapterText}"""
+```
+
+---
+
+## 12. Implementation Plan (Phased)
+
+Each phase ends with a **verifiable deliverable**. Do not proceed until the deliverable works.
+
+### 🏗️ Phase 0 — Setup (2–3 days)
+**Tasks:**
+- Create Cloudflare account → Pages project → link GitHub repo
+- Create D1 database (`wrangler d1 create app-db`) and bind in `wrangler.toml`
+- Create R2 bucket
+- Scaffold `index.html`, `app.js`, `style.css`, `/functions/api/ping.js`
+- Write `schema.sql` and execute
+- Create `books.json` with Grade 4 seed (English, Maths, EVS, Hindi — 8–10 chapters each)
+
+**Deliverable:** `*.pages.dev` URL loads, `/api/ping` returns `{ok:true}`, D1 tables exist.
+
+---
+
+### 🔐 Phase 1 — Auth & Data Foundation (3–4 days)
+**Tasks:**
+- `/api/signup`, `/api/login`, `/api/logout` Worker functions
+- Password hashing with Web Crypto PBKDF2 (no npm)
+- Session issuance (HttpOnly, Secure, SameSite=Lax)
+- `_middleware.js` enforcing auth on `/api/*`
+- Parent dashboard shell + child dashboard shell
+- Export/Import JSON buttons (parent-only)
+- Wire seed `books.json` into parent dashboard chapter list
+
+**Deliverable:** Login on two devices with same credentials → identical chapter list. Logout on one does not affect the other.
+
+---
+
+### 📸 Phase 2 — Capture & OCR (4–5 days)
+**Tasks:**
+- Camera/file input (`<input type="file" capture="environment">`)
+- `tryOCR(file)` with the 3-tier fallback (Section 9)
+- `/api/ocr` Worker using Workers AI Vision
+- `/api/books` POST — fingerprint dedupe
+- `/api/chapters` POST/GET
+- Parent review & correction screen for OCR output
+- IndexedDB helper module (`idbPut`, `idbGet`, `idbDelete`)
+
+**Deliverable:** Capture a Grade 4 cover once → chapters appear → reload / open on another device → no re-capture prompt.
+
+---
+
+### 🤖 Phase 3 — AI Generation (4–5 days)
+**Tasks:**
+- `/api/quiz/generate` calls Workers AI with quiz prompt (Section 11.1)
+- Stores raw result in `quiz_cache` with `approved=0`
+- `/api/quiz/approve` — parent edits + approves
+- `/api/quiz/:chapterId` — child fetches; strips `answer` unless `answer_key_visible=1`
+- Parent toggle for `answer_key_visible`
+- Child test-taking UI
+- "Regenerate" button (burns AI quota — confirm before calling)
+
+**Deliverable:** Parent generates → reviews → approves. Child takes test on a different device. Answer key hidden by default.
+
+---
+
+### 🎮 Phase 4 — Learning Modes (5–6 days)
+**Tasks:**
+- `/api/learning/generate` with 3 prompt variants (Sections 11.2–11.4)
+- Store in `quiz_cache.learning_json`
+- Chapter page tab UI: 👁️ Visual | 🛠️ Practical | 🎲 Fun | 📝 Test
+- **Visual**: load Mermaid CDN, `mermaid.render()` from AI code
+- **Practical**: styled card renderer
+- **Fun**: `renderMatchingGame(pairs)` — plain JS drag-and-drop (~50 lines)
+- Cache all three learning modes so re-opens are instant
+
+**Deliverable:** Child can complete a full learning cycle on a chapter before taking the test.
+
+---
+
+### 📊 Phase 5 — Progress & Polish (3–4 days)
+**Tasks:**
+- `/api/progress/submit` on test completion
+- `/api/progress/:childId` for dashboard
+- **Revision Round**: resurface `wrong_json` items after N days
+- Chart.js progress dashboard (parent + child views)
+- `"Saved ✓ / Not saved ✗"` toast on every write (Section 8.1)
+- Optimistic concurrency check on chapter/quiz updates
+- Mobile-friendly responsive CSS (Tailwind)
+
+**Deliverable:** Full loop works: capture → learn → test → track → revise.
+
+---
+
+### 🛡️ Phase 6 — Safety Nets & Launch (2–3 days)
+**Tasks:**
+- Weekly Cron Trigger Worker → export all D1 tables to R2 as JSON
+- Optional service worker caching static assets only
+- Manual verification checklist (Section 14)
+- Run one full chapter with the child, tune prompts for difficulty
+- Document backup restore process in `README.md`
+
+**Deliverable:** Production-ready, family-tested, data-safe.
+
+**Total estimate: ~5–6 weeks part-time.**
+
+---
+
+## 13. Free-Tier Budget Check
+
+| Service | Family Usage | Free Limit | Headroom |
+|---|---|---|---|
+| Workers req/day | ~200 | 100,000 | 500× |
+| Workers AI Neurons/day | ~300–800 | 10,000 | ~12× |
+| D1 storage | < 50 MB | 5 GB | 100× |
+| D1 rows/day | ~500 | 5,000,000 | huge |
+| R2 storage | < 100 MB | 10 GB | 100× |
+| Pages bandwidth | negligible | unlimited | — |
+
+**Comfortably free for one child. Even 20 families fit.**
+
+---
+
+## 14. Verification Checklist (Before Going Live)
+
+Run this manually on **two different devices** (phone + laptop) with the same parent login:
+
+- [ ] Login on Device A → capture a book → chapters saved
+- [ ] Login on Device B → same chapters visible **without** re-capture
+- [ ] Clear browser data on Device A → reload → data still present (from D1)
+- [ ] Add a chapter on Device B → visible on Device A after refresh
+- [ ] Child login on Device A → answer key hidden by default
+- [ ] Parent enables answer key → child on Device B sees answers
+- [ ] Disable network on Device A → last cached view still renders
+- [ ] Re-enable network → data revalidates from D1
+- [ ] Click "Export JSON" → file downloads with all tables
+- [ ] Delete a chapter → click "Import JSON" (previous export) → chapter restored
+- [ ] Verify no `localhost:8787` strings exist in deployed JS
+- [ ] Verify session cookie is HttpOnly and Secure in browser devtools
+
+---
+
+## 15. Known Risks & Guardrails
+
+| Risk | Guardrail |
+|---|---|
+| OCR misreads | 3-tier fallback + manual correction screen + fuzzy match to seed |
+| Free AI rate limit hit | Quizzes cached in `quiz_cache`; regenerate only on demand |
+| AI generates off-syllabus questions | **Parent approval is mandatory** before child sees them |
+| Data lost on another device | Write-through to D1 + relative URLs + server sessions |
+| Accidental DB wipe | Weekly R2 export + D1 Time Travel (30 days) + manual JSON export |
+| Local vs deployed D1 confusion | `wrangler dev --remote` for real data; never hardcode DB IDs |
+| Service worker serving stale API | Cache static only; `/api/*` is network-first |
+
+---
+
+## 16. MVP Path (Fastest Proof)
+
+If you want to validate before full build, ship **only this first (~10 days)**:
+
+1. Parent login + child login
+2. Seed `books.json` for **Grade 4 Maths only**
+3. Chapter list → tap chapter → AI-generated MCQs (parent auto-approves)
+4. Answer-key toggle
+5. Deployed on Cloudflare, verified on two devices
+
+Then layer on OCR (Phase 2), learning modes (Phase 4), and progress (Phase 5).
+
+---
+
+## 17. Coding Conventions for Copilot
+
+- **Plain JS only.** No classes unless required; prefer small functions.
+- **Async/await everywhere** — no `.then()` chains beyond the fallback patterns shown.
+- **All API calls** go through a helper: `apiFetch(path, options)` that adds `credentials: 'include'` and toasts on failure.
+- **All DB writes** go through a helper: `saveAndCache(endpoint, data, cacheKey)` implementing the write-through pattern.
+- **No inline `onclick`** in HTML — attach listeners in `app.js`.
+- **Comments in English**, concise, explaining *why* not *what*.
+- **File naming**: kebab-case for HTML/CSS, camelCase for JS identifiers.
+- **Error messages**: user-friendly, no stack traces shown in UI.
+- **Never trust client input** — validate on the Worker before writing to D1.
+
+---
+
+## 18. Reference Commands
+
+```bash
+# Install Wrangler CLI
+npm install -g wrangler
+
+# Login
+wrangler login
+
+# Create D1 database
+wrangler d1 create app-db
+
+# Apply schema (local sandbox)
+wrangler d1 execute app-db --file=schema.sql
+
+# Apply schema (production)
+wrangler d1 execute app-db --remote --file=schema.sql
+
+# Local dev against real D1
+wrangler dev --remote
+
+# Deploy
+wrangler pages deploy .
+
+# Inspect production data
+wrangler d1 execute app-db --remote --command="SELECT * FROM books LIMIT 10"
+
+# D1 Time Travel restore (if disaster strikes)
+wrangler d1 time-travel restore app-db --timestamp=2026-11-10T10:00:00Z
+```
+
+---
+
+## 19. Success Criteria
+
+The app is **done** when all of these are true:
+
+1. ✅ Parent captures a Grade 4 book cover **once**; chapters appear on every device thereafter without re-capture
+2. ✅ Child learns each chapter through Visual, Practical, Fun, and Test modes
+3. ✅ Parent approves every quiz before the child sees it; answer key is hidden unless parent enables it
+4. ✅ Progress and wrong answers are tracked; a Revision Round resurfaces mistakes
+5. ✅ Clearing browser data on any device loses nothing — D1 is authoritative
+6. ✅ The whole system runs on free-tier Cloudflare
+7. ✅ No framework, no build step, no credit card
+
+---
+
+**End of documentation. Hand this file to GitHub Copilot with the instruction: "Implement Phase 0 first. Follow Section 8 (Data-Safety Rules) exactly. Do not introduce any framework or build step."**
