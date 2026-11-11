@@ -19,8 +19,14 @@
   </header>
 
   <main class="max-w-4xl mx-auto px-4 py-6 space-y-6">
-    <!-- @revision -->
-    <!-- @progress -->
+    <section id="revision-panel" class="card hidden border-2 border-amber-300" aria-labelledby="revision-title">
+      <h2 id="revision-title" class="text-lg font-semibold mb-2">🔁 Revision Round</h2>
+      <div id="revision-root"></div>
+    </section>
+    <section id="progress-panel" class="card hidden" aria-labelledby="progress-title">
+      <h2 id="progress-title" class="text-lg font-semibold mb-3">⭐ How I'm doing</h2>
+      <div id="progress-root"></div>
+    </section>
     <section aria-labelledby="books-title">
       <h2 id="books-title" class="text-xl font-semibold mb-3">📚 My books</h2>
       <div id="books-root"><p class="text-slate-400 text-sm">Loading…</p></div>

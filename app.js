@@ -224,10 +224,20 @@ async function cachedRead(store, key, path, render, pick = d => d) {
 // Auth
 // =====================================================================
 
+// Offline (network error, not a 401): fall back to the last identity the
+// server confirmed, so cached pages still open. Any write still needs D1.
 async function getMe() {
   try {
-    return await apiFetch('/api/me', { silent: true });
-  } catch {
+    const me = await apiFetch('/api/me', { silent: true });
+    await idbPut('meta', 'me', me).catch(() => {});
+    return me;
+  } catch (e) {
+    if (e && e.status === 0) {
+      const cached = await idbGet('meta', 'me').catch(() => undefined);
+      if (cached) { showToast('Offline — showing saved copy. Changes need a connection.', 'error', 4000); return cached; }
+    } else if (e && e.status === 401) {
+      await idbDelete('meta', 'me').catch(() => {});
+    }
     return null;
   }
 }
@@ -1060,4 +1070,720 @@ function renderTextEditor(root, text, source) {
     h('p', { class: 'text-xs text-slate-500 mb-1' }, 'Fix any misread words before saving.'),
     area,
     h('div', { class: 'flex gap-2 mt-2' }, save, cancel));
+}
+
+// =====================================================================
+// Phase 3 + 4 — Chapter tabs: 👁️ Visual | 🛠️ Practical | 🎲 Fun | 📝 Test
+// =====================================================================
+
+const TABS = [
+  { id: 'visual', label: '👁️ Visual' },
+  { id: 'practical', label: '🛠️ Practical' },
+  { id: 'fun', label: '🎲 Fun' },
+  { id: 'test', label: '📝 Test' }
+];
+
+function renderTabs(ch, me) {
+  // Cached + fresh renders can both arrive; rebuild only when the chapter changed.
+  const sig = `${ch.id}|${ch.updated_at}`;
+  if (chapterState.tabSig === sig) return;
+  chapterState.tabSig = sig;
+
+  const bar = clear($('#tab-bar'));
+  const initial = TABS.some(t => `#${t.id}` === location.hash) ? location.hash.slice(1) : 'visual';
+  for (const t of TABS) {
+    const btn = h('button', { type: 'button', role: 'tab', class: 'tab', dataset: { tab: t.id } }, t.label);
+    btn.addEventListener('click', () => showTab(t.id, ch, me));
+    bar.appendChild(btn);
+  }
+  showTab(initial, ch, me);
+}
+
+function showTab(id, ch, me) {
+  history.replaceState(null, '', `#${id}`);
+  $$('#tab-bar .tab').forEach(b => {
+    const on = b.dataset.tab === id;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  const body = clear($('#tab-body'));
+  const isParent = me.user.role === 'parent';
+  if (id === 'test') return isParent ? renderParentTest(body, ch) : renderChildTest(body, ch);
+  return renderLearningTab(body, ch, id, isParent);
+}
+
+function needsTextNote(isParent) {
+  return emptyState(isParent
+    ? 'Save the chapter text above first — all learning content is made from it.'
+    : 'This chapter is not ready yet. Ask your parent to add it. 🙂');
+}
+
+// ---------- Learning tabs (Visual / Practical / Fun) ----------
+
+async function renderLearningTab(body, ch, mode, isParent) {
+  const content = h('div');
+  const tools = h('div', { class: 'flex flex-wrap gap-2 mt-4' });
+  body.append(content, tools);
+  content.appendChild(h('p', { class: 'text-slate-400 text-sm' }, 'Loading…'));
+
+  let lastSig = null;
+  const draw = (learning, force) => {
+    const sig = JSON.stringify(learning && learning[mode]);
+    if (force !== true && sig === lastSig) return;   // don't reset a game mid-play
+    lastSig = sig;
+    clear(content);
+    clear(tools);
+    const value = learning && learning[mode];
+    if (value) {
+      if (mode === 'visual') renderMindmap(content, value);
+      if (mode === 'practical') renderPractical(content, value);
+      if (mode === 'fun') renderMatchingGame(content, value);
+    } else if (!isParent) {
+      content.appendChild(emptyState('Coming soon — your parent is getting this ready. 🙂'));
+    } else if (!ch.content_text) {
+      content.appendChild(needsTextNote(true));
+    } else {
+      content.appendChild(emptyState(`No ${mode} content yet for this chapter.`));
+    }
+    if (isParent && ch.content_text) {
+      const label = value ? '↻ Regenerate' : `✨ Create ${mode} content with AI`;
+      const btn = h('button', { type: 'button', class: value ? 'btn-secondary' : 'btn-primary' }, label);
+      btn.addEventListener('click', async () => {
+        if (value && !confirm('Regenerating uses today\'s free AI quota and replaces this content. Continue?')) return;
+        setBusy(btn, true, 'Creating… (can take ~20 s)');
+        try {
+          const res = await saveAndCache('/api/learning/generate', { chapter_id: ch.id, mode, regenerate: !!value },
+            { store: 'learning', key: ch.id, pick: d => d.learning });
+          draw(res.learning, true);
+        } catch { setBusy(btn, false); }
+      });
+      tools.appendChild(btn);
+    }
+  };
+
+  try {
+    await cachedRead('learning', ch.id, `/api/learning/${encodeURIComponent(ch.id)}`, draw, d => d.learning);
+  } catch {
+    clear(content).appendChild(emptyState('Could not load this right now. Check your connection.'));
+  }
+}
+
+// AI mind maps often contain shape syntax or punctuation Mermaid rejects;
+// rebuild a clean tree of plain labels and keep the indentation.
+function parseMindmap(code) {
+  const lines = String(code || '').replace(/```(?:mermaid)?/gi, '').split('\n');
+  const nodes = [];
+  for (const raw of lines) {
+    if (!raw.trim() || /^\s*mindmap\b/i.test(raw) || /^\s*(%%|::icon|::)/.test(raw)) continue;
+    const indent = raw.match(/^\s*/)[0].replace(/\t/g, '  ').length;
+    let text = raw.trim()
+      .replace(/^[\w-]*\s*(\(\(|\{\{|\)\)|\(|\[|\{|\))/, '')
+      .replace(/(\)\)|\}\}|\(\(|\)|\]|\}|\()$/, '')
+      .replace(/[()[\]{}"`<>]/g, '')
+      .replace(/^[-*•]\s*/, '')
+      .trim();
+    if (text) nodes.push({ indent, text: text.slice(0, 60) });
+  }
+  return nodes.slice(0, 40);
+}
+
+function sanitizeMindmap(code) {
+  const nodes = parseMindmap(code);
+  if (!nodes.length) return null;
+  const rootIndent = nodes[0].indent;
+  const out = ['mindmap', `  root((${nodes[0].text}))`];
+  for (const n of nodes.slice(1)) {
+    const rel = Math.max(2, n.indent - rootIndent);
+    out.push(`${' '.repeat(2 + rel)}${n.text}`);
+  }
+  return out.join('\n');
+}
+
+let mermaidReady = null;
+async function renderMindmap(container, code) {
+  const box = h('div', { class: 'mindmap overflow-x-auto' }, h('p', { class: 'text-slate-400 text-sm' }, 'Drawing the mind map…'));
+  container.appendChild(box);
+  const clean = sanitizeMindmap(code);
+  try {
+    if (!clean) throw new Error('empty');
+    mermaidReady = mermaidReady || loadScript(CDN.mermaid).then(() => {
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default', themeVariables: { fontSize: '18px' } });
+    });
+    await mermaidReady;
+    const { svg } = await mermaid.render(`mm-${Date.now()}`, clean);
+    box.innerHTML = svg;   // SVG produced by Mermaid in strict mode from sanitised labels
+    requestAnimationFrame(() => { box.scrollLeft = (box.scrollWidth - box.clientWidth) / 2; });
+  } catch (e) {
+    console.warn('Mermaid render failed, showing outline', e);
+    clear(box).appendChild(renderOutline(parseMindmap(code)));
+  }
+}
+
+function renderOutline(nodes) {
+  const root = h('ul', { class: 'outline' });
+  const stack = [{ indent: -1, list: root }];
+  for (const n of nodes) {
+    while (stack.length > 1 && n.indent <= stack[stack.length - 1].indent) stack.pop();
+    const li = h('li', {}, n.text);
+    stack[stack.length - 1].list.appendChild(li);
+    const sub = h('ul');
+    li.appendChild(sub);
+    stack.push({ indent: n.indent, list: sub });
+  }
+  return root;
+}
+
+function renderPractical(container, act) {
+  container.appendChild(h('article', { class: 'activity-card' },
+    h('p', { class: 'text-xs uppercase tracking-wide text-emerald-700 font-semibold' }, 'Try this at home'),
+    h('h3', { class: 'text-xl font-bold mb-3' }, act.title),
+    act.materials && act.materials.length ? h('div', { class: 'mb-3' },
+      h('h4', { class: 'font-semibold' }, '🧺 You need'),
+      h('ul', { class: 'list-disc pl-6' }, act.materials.map(m => h('li', {}, m)))) : null,
+    h('div', { class: 'mb-3' },
+      h('h4', { class: 'font-semibold' }, '👣 Steps'),
+      h('ol', { class: 'list-decimal pl-6 space-y-1' }, act.steps.map(s => h('li', {}, s)))),
+    act.learning ? h('p', { class: 'bg-white/70 rounded p-3' }, h('strong', {}, '💡 What you learn: '), act.learning) : null,
+    h('p', { class: 'text-xs text-slate-500 mt-3' }, 'Do this with a grown-up nearby.')));
+}
+
+// ---------- 🎲 Matching game: drag (mouse or touch) or tap-tap ----------
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function renderMatchingGame(container, pairs) {
+  clear(container);
+  let matched = 0;
+  let selected = null;
+  const status = h('p', { class: 'text-sm text-slate-600 mb-3', 'aria-live': 'polite' },
+    'Drag each card on the right to its match on the left — or tap a card, then tap its match.');
+  const slots = h('div', { class: 'mg-col' });
+  const chips = h('div', { class: 'mg-col' });
+
+  pairs.forEach((p, i) => slots.appendChild(h('div', { class: 'mg-slot', dataset: { i } },
+    h('span', { class: 'mg-label' }, p.left), h('span', { class: 'mg-drop' }, '…'))));
+  shuffle(pairs.map((p, i) => ({ ...p, i }))).forEach(p => chips.appendChild(h('div', { class: 'mg-chip', dataset: { i: p.i }, tabindex: 0 }, p.right)));
+
+  function tryMatch(chip, slot) {
+    if (!chip || !slot || slot.classList.contains('done')) return;
+    if (chip.dataset.i === slot.dataset.i) {
+      slot.classList.add('done');
+      $('.mg-drop', slot).textContent = chip.textContent;
+      chip.remove();
+      matched++;
+      status.textContent = matched === pairs.length ? '🎉 Brilliant! You matched them all!' : `✅ Correct! ${pairs.length - matched} to go.`;
+      if (matched === pairs.length) {
+        container.appendChild(h('button', { type: 'button', class: 'btn-primary mt-4', on: { click: () => renderMatchingGame(container, pairs) } }, 'Play again'));
+      }
+    } else {
+      slot.classList.add('wrong');
+      chip.classList.add('wrong');
+      status.textContent = '🤔 Not quite — try another one.';
+      setTimeout(() => { slot.classList.remove('wrong'); chip.classList.remove('wrong'); }, 500);
+    }
+    select(null);
+  }
+
+  function select(chip) {
+    if (selected) selected.classList.remove('selected');
+    selected = chip;
+    if (chip) chip.classList.add('selected');
+  }
+
+  chips.addEventListener('pointerdown', e => {
+    const chip = e.target.closest('.mg-chip');
+    if (!chip) return;
+    e.preventDefault();
+    const start = { x: e.clientX, y: e.clientY };
+    let dragging = false;
+    chip.setPointerCapture(e.pointerId);
+    const move = ev => {
+      const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
+      if (!dragging && Math.hypot(dx, dy) > 6) { dragging = true; chip.classList.add('dragging'); }
+      if (dragging) chip.style.transform = `translate(${dx}px, ${dy}px)`;
+    };
+    const up = ev => {
+      chip.removeEventListener('pointermove', move);
+      chip.removeEventListener('pointerup', up);
+      chip.removeEventListener('pointercancel', up);
+      if (dragging) {
+        chip.style.visibility = 'hidden';
+        const under = document.elementFromPoint(ev.clientX, ev.clientY);
+        chip.style.visibility = '';
+        chip.style.transform = '';
+        chip.classList.remove('dragging');
+        tryMatch(chip, under && under.closest('.mg-slot'));
+      } else {
+        select(selected === chip ? null : chip);
+      }
+    };
+    chip.addEventListener('pointermove', move);
+    chip.addEventListener('pointerup', up);
+    chip.addEventListener('pointercancel', up);
+  });
+  chips.addEventListener('keydown', e => {
+    const chip = e.target.closest('.mg-chip');
+    if (chip && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(chip); }
+  });
+  slots.addEventListener('click', e => {
+    const slot = e.target.closest('.mg-slot');
+    if (slot && selected) tryMatch(selected, slot);
+  });
+
+  container.append(status, h('div', { class: 'mg-board' }, slots, chips));
+}
+
+// ---------- 📝 Test: shared question inputs ----------
+
+function questionText(item) {
+  return item.question || item.statement || '';
+}
+
+function renderQuestionInput(type, item, name) {
+  if (type === 'mcq') {
+    return h('div', { class: 'grid gap-2 sm:grid-cols-2' }, item.options.map(o =>
+      h('label', { class: 'choice' }, h('input', { type: 'radio', name, value: o }), h('span', {}, o))));
+  }
+  if (type === 'true_false') {
+    return h('div', { class: 'flex gap-2' },
+      h('label', { class: 'choice' }, h('input', { type: 'radio', name, value: 'true' }), h('span', {}, '✔️ True')),
+      h('label', { class: 'choice' }, h('input', { type: 'radio', name, value: 'false' }), h('span', {}, '❌ False')));
+  }
+  if (type === 'fill_blank') return h('input', { class: 'input w-full', name, autocomplete: 'off', placeholder: 'Type the missing word' });
+  return h('textarea', { class: 'input w-full', name, rows: type === 'long' ? 5 : 3, placeholder: 'Write your answer' });
+}
+
+function readAnswer(form, type, name) {
+  if (type === 'mcq' || type === 'true_false') {
+    const el = $(`input[name="${CSS.escape(name)}"]:checked`, form);
+    if (!el) return undefined;
+    return type === 'true_false' ? el.value === 'true' : el.value;
+  }
+  const el = form.elements[name];
+  return el ? el.value.trim() : undefined;
+}
+
+const TYPE_TITLES = {
+  mcq: 'Choose the right answer', fill_blank: 'Fill in the blanks', true_false: 'True or false?',
+  short: 'Answer in a few words', long: 'Answer in detail'
+};
+const QUIZ_TYPES = ['mcq', 'fill_blank', 'true_false', 'short', 'long'];
+
+function markResult(block, r) {
+  if (!block || !r) return;
+  block.classList.add(r.correct ? 'q-right' : 'q-wrong');
+  const note = h('div', { class: 'text-sm mt-2' }, r.correct ? '✅ Correct!' : '❌ Not quite.');
+  if (r.answer !== undefined && !r.correct) note.append(' Answer: ', h('strong', {}, String(r.answer === true ? 'True' : r.answer === false ? 'False' : r.answer)));
+  if (r.explanation) note.append(h('div', { class: 'text-slate-600' }, r.explanation));
+  block.appendChild(note);
+}
+
+// ---------- 📝 Test: child ----------
+
+async function renderChildTest(body, ch) {
+  // cachedRead may render twice (cache, then server); never wipe a test in progress.
+  const draw = (data, force) => {
+    const sig = JSON.stringify(data.quiz);
+    if (force !== true && body.dataset.sig === sig) return;
+    body.dataset.sig = sig;
+    clear(body);
+    const quiz = data.quiz;
+    const form = h('form', { class: 'space-y-6' });
+    let n = 0;
+    for (const type of QUIZ_TYPES) {
+      const items = quiz[type] || [];
+      if (!items.length) continue;
+      const sec = h('fieldset', { class: 'space-y-3' }, h('legend', { class: 'font-semibold text-lg mb-2' }, TYPE_TITLES[type]));
+      items.forEach((item, i) => {
+        const qid = `${type}-${i}`;
+        sec.appendChild(h('div', { class: 'q-block', dataset: { qid } },
+          h('p', { class: 'font-medium mb-2' }, `${++n}. ${questionText(item)}`),
+          renderQuestionInput(type, item, qid)));
+      });
+      form.appendChild(sec);
+    }
+    const submit = h('button', { type: 'submit', class: 'btn-primary w-full sm:w-auto' }, 'Check my answers');
+    const result = h('div', { 'aria-live': 'polite' });
+    form.append(submit, result);
+
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const answers = {};
+      for (const type of QUIZ_TYPES) (quiz[type] || []).forEach((_, i) => {
+        const v = readAnswer(form, type, `${type}-${i}`);
+        if (v !== undefined && v !== '') answers[`${type}-${i}`] = v;
+      });
+      setBusy(submit, true, 'Checking…');
+      try {
+        const res = await saveAndCache('/api/progress/submit', { chapter_id: ch.id, answers },
+          { store: 'progress', key: `last:${ch.id}` });
+        submit.remove();
+        $$('input, textarea', form).forEach(el => { el.disabled = true; });
+        res.results.forEach(r => markResult($(`[data-qid="${r.qid}"]`, form), r));
+        $$('.q-block', form).filter(b => /^(short|long)-/.test(b.dataset.qid)).forEach(b => {
+          const model = (res.written || []).find(w => w.qid === b.dataset.qid);
+          b.appendChild(h('div', { class: 'text-sm mt-2 text-slate-600' }, '📝 Your parent will read this answer.',
+            model && model.model_answer ? h('div', {}, 'Sample answer: ', model.model_answer) : null));
+        });
+        const stars = res.score === null ? '' : res.score >= 90 ? '⭐⭐⭐' : res.score >= 60 ? '⭐⭐' : '⭐';
+        clear(result).append(h('div', { class: 'score-banner' },
+          h('p', { class: 'text-3xl' }, stars),
+          h('p', { class: 'text-xl font-bold' }, res.score === null ? 'Answers sent!' : `You scored ${res.score}% (${res.correct} of ${res.total})`),
+          h('p', { class: 'text-sm' }, res.answer_key_visible ? 'Check the answers above.' : 'Mistakes come back later in a Revision Round.'),
+          h('button', { type: 'button', class: 'btn-secondary mt-3', on: { click: () => draw(data, true) } }, 'Try again')));
+        result.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch { setBusy(submit, false); }
+    });
+    body.appendChild(form);
+  };
+
+  try {
+    await cachedRead('quiz', ch.id, `/api/quiz/${encodeURIComponent(ch.id)}`, draw);
+  } catch (e) {
+    clear(body).appendChild(emptyState(e.status === 404 ? 'Your test is not ready yet — ask your parent. 🙂' : 'Could not load the test. Check your connection.'));
+  }
+}
+
+// ---------- 📝 Test: parent — generate, review/edit, approve, answer key ----------
+
+async function renderParentTest(body, ch) {
+  clear(body).appendChild(h('p', { class: 'text-slate-400 text-sm' }, 'Loading…'));
+  let data;
+  try {
+    data = await apiFetch(`/api/quiz/${encodeURIComponent(ch.id)}`, { silent: true });
+    await idbPut('quiz', ch.id, data);
+  } catch (e) {
+    if (e.status !== 404) {
+      data = await idbGet('quiz', ch.id);
+      if (!data) { clear(body).appendChild(emptyState('Could not load questions. Check your connection.')); return; }
+    }
+  }
+  if (!data) {
+    clear(body);
+    if (!ch.content_text) { body.appendChild(needsTextNote(true)); return; }
+    const btn = h('button', { type: 'button', class: 'btn-primary' }, '✨ Generate questions with AI');
+    btn.addEventListener('click', async () => {
+      setBusy(btn, true, 'Writing questions… (~30 s)');
+      try {
+        const res = await saveAndCache('/api/quiz/generate', { chapter_id: ch.id }, { store: 'quiz', key: ch.id });
+        renderQuizEditor(body, ch, res);
+      } catch { setBusy(btn, false); }
+    });
+    body.append(emptyState('No questions yet. The AI writes 5 MCQs, 3 fill-in-the-blanks, 2 true/false, 2 short and 1 long question from the chapter text. You review them before your child sees anything.'), btn);
+    return;
+  }
+  renderQuizEditor(body, ch, data);
+}
+
+function renderQuizEditor(body, ch, data) {
+  clear(body);
+  const status = h('span', { class: `badge ${data.approved ? 'badge-ok' : 'badge-warn'}` },
+    data.approved ? 'Approved ✓ — visible to child' : 'Draft — child cannot see it yet');
+
+  const keyToggle = h('input', { type: 'checkbox', checked: !!data.answer_key_visible });
+  keyToggle.addEventListener('change', async () => {
+    try {
+      const res = await saveAndCache('/api/quiz/answer-key', { chapter_id: ch.id, visible: keyToggle.checked });
+      data.answer_key_visible = res.answer_key_visible;
+      data.updated_at = res.updated_at;
+      await idbPut('quiz', ch.id, data);
+    } catch { keyToggle.checked = !keyToggle.checked; }
+  });
+
+  const regen = h('button', { type: 'button', class: 'btn-danger' }, '↻ Regenerate');
+  regen.addEventListener('click', async () => {
+    if (!confirm('Regenerate all questions?\n\nThis uses today\'s free AI quota and replaces the current set. Your child will not see the new set until you approve it.')) return;
+    setBusy(regen, true, 'Regenerating…');
+    try {
+      const res = await saveAndCache('/api/quiz/generate', { chapter_id: ch.id, regenerate: true }, { store: 'quiz', key: ch.id });
+      renderQuizEditor(body, ch, res);
+    } catch { setBusy(regen, false); }
+  });
+
+  const sections = h('div', { class: 'space-y-6' });
+  for (const type of QUIZ_TYPES) sections.appendChild(renderTypeEditor(type, data.quiz[type] || []));
+
+  const save = async approved => {
+    const btn = approved ? approveBtn : draftBtn;
+    setBusy(btn, true, 'Saving…');
+    try {
+      const res = await saveAndCache('/api/quiz/approve',
+        { chapter_id: ch.id, questions: collectQuiz(sections), approved, updated_at: data.updated_at },
+        { store: 'quiz', key: ch.id });
+      renderQuizEditor(body, ch, res);
+    } catch (e) {
+      setBusy(btn, false);
+      if (e.status === 409) renderParentTest(body, ch);
+    }
+  };
+  const draftBtn = h('button', { type: 'button', class: 'btn-secondary', on: { click: () => save(false) } }, 'Save draft');
+  const approveBtn = h('button', { type: 'button', class: 'btn-primary', on: { click: () => save(true) } }, data.approved ? 'Save changes ✓' : 'Approve for child ✓');
+
+  body.append(
+    h('div', { class: 'flex flex-wrap items-center justify-between gap-3 mb-4' },
+      status,
+      h('label', { class: 'flex items-center gap-2 text-sm' }, keyToggle, 'Show answer key to child'),
+      regen),
+    h('p', { class: 'text-sm text-slate-500 mb-4' }, 'Read every question. Fix anything wrong or off-syllabus, then approve.'),
+    sections,
+    h('div', { class: 'editor-actions' }, draftBtn, approveBtn));
+}
+
+function renderTypeEditor(type, items) {
+  const list = h('div', { class: 'space-y-3' });
+  const sec = h('section', { dataset: { type } },
+    h('h3', { class: 'font-semibold mb-2' }, `${TYPE_TITLES[type]} (${type.replace('_', ' ')})`), list);
+  const add = item => list.appendChild(renderItemEditor(type, item));
+  items.forEach(add);
+  sec.appendChild(h('button', { type: 'button', class: 'link text-sm mt-2', on: { click: () => add({}) } }, '+ Add question'));
+  return sec;
+}
+
+function renderItemEditor(type, item) {
+  const wrap = h('div', { class: 'q-edit', dataset: { type } });
+  const remove = h('button', { type: 'button', class: 'icon-btn float-right', 'aria-label': 'Delete question', on: { click: () => wrap.remove() } }, '🗑');
+  const field = (name, value, opts = {}) => {
+    const el = opts.area ? h('textarea', { class: 'input w-full', name, rows: opts.rows || 2 }) : h('input', { class: 'input w-full', name });
+    el.value = value ?? '';
+    if (opts.placeholder) el.placeholder = opts.placeholder;
+    return el;
+  };
+  wrap.appendChild(remove);
+  wrap.appendChild(field(type === 'true_false' ? 'statement' : 'question', questionText(item), { area: true, placeholder: type === 'true_false' ? 'Statement' : 'Question' }));
+
+  if (type === 'mcq') {
+    const opts = [...(item.options || [])];
+    while (opts.length < 4) opts.push('');
+    const optInputs = opts.map((o, i) => field('option', o, { placeholder: `Option ${String.fromCharCode(65 + i)}` }));
+    const answer = h('select', { class: 'input w-full', name: 'answer' });
+    const refresh = () => {
+      const keep = answer.value || item.answer;
+      clear(answer).appendChild(h('option', { value: '' }, '— correct option —'));
+      optInputs.map(i => i.value.trim()).filter(Boolean).forEach(v => answer.appendChild(h('option', { value: v, selected: v === keep }, v)));
+    };
+    optInputs.forEach(i => i.addEventListener('input', refresh));
+    refresh();
+    wrap.append(h('div', { class: 'grid gap-2 sm:grid-cols-2 my-2' }, optInputs), h('label', { class: 'text-sm' }, 'Correct answer', answer));
+  } else if (type === 'true_false') {
+    const sel = h('select', { class: 'input', name: 'answer' },
+      h('option', { value: '' }, '— choose —'),
+      h('option', { value: 'true', selected: item.answer === true }, 'True'),
+      h('option', { value: 'false', selected: item.answer === false }, 'False'));
+    wrap.append(h('label', { class: 'text-sm block my-2' }, 'Answer ', sel));
+  } else {
+    wrap.append(h('label', { class: 'text-sm block my-2' }, type === 'fill_blank' ? 'Answer (use / for alternatives)' : 'Model answer',
+      field('answer', item.answer, { area: type !== 'fill_blank', rows: type === 'long' ? 4 : 2 })));
+  }
+  wrap.append(h('label', { class: 'text-sm block' }, 'Explanation (shown with answer key)', field('explanation', item.explanation)));
+  return wrap;
+}
+
+function collectQuiz(root) {
+  const quiz = {};
+  for (const type of QUIZ_TYPES) {
+    quiz[type] = $$(`section[data-type="${type}"] .q-edit`, root).map(el => {
+      const v = n => { const f = $(`[name="${n}"]`, el); return f ? f.value.trim() : ''; };
+      const base = { explanation: v('explanation') };
+      if (type === 'mcq') return { ...base, question: v('question'), options: $$('[name=option]', el).map(i => i.value.trim()).filter(Boolean), answer: v('answer') };
+      if (type === 'true_false') return { ...base, statement: v('statement'), answer: v('answer') === '' ? null : v('answer') === 'true' };
+      return { ...base, question: v('question'), answer: v('answer') };
+    }).filter(x => x.question || x.statement);
+  }
+  return quiz;
+}
+
+// =====================================================================
+// Phase 5 — Progress dashboards + Revision Round
+// =====================================================================
+
+const charts = {};
+function drawChart(key, canvas, config) {
+  if (charts[key]) charts[key].destroy();
+  charts[key] = new Chart(canvas, config);
+}
+
+async function fetchProgress(childId, render) {
+  return cachedRead('progress', childId, `/api/progress/${encodeURIComponent(childId)}`, render);
+}
+
+function subjectTiles(subjects, simple) {
+  return h('div', { class: 'grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4' }, sortBooks(subjects.map(s => ({ ...s, title: s.subject }))).map(s => {
+    const pct = s.chapters ? Math.round((s.completed / s.chapters) * 100) : 0;
+    return h('div', { class: 'stat-tile' },
+      h('p', { class: 'font-semibold' }, `${SUBJECT_ICON[s.subject] || '📘'} ${s.subject}`),
+      h('p', { class: 'text-sm text-slate-600' }, `${s.completed} / ${s.chapters} chapters`),
+      h('div', { class: 'bar my-1' }, h('span', { style: `width:${pct}%` })),
+      s.average === null ? h('p', { class: 'text-xs text-slate-400' }, 'no tests yet')
+        : h('p', { class: 'text-xs' }, simple ? `${'⭐'.repeat(Math.max(1, Math.round(s.average / 34)))} ${s.average}%` : `avg ${s.average}%`));
+  }));
+}
+
+// ---------- Parent ----------
+
+function initParentProgress(children) {
+  const panel = $('#progress-panel');
+  if (!panel) return;
+  if (!children.length) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  const sel = clear($('#progress-child'));
+  children.forEach(c => sel.appendChild(h('option', { value: c.id }, c.email)));
+  sel.classList.toggle('hidden', children.length < 2);
+  const load = () => fetchProgress(sel.value, renderParentProgress).catch(() => {
+    clear($('#progress-root')).appendChild(emptyState('Could not load progress.'));
+  });
+  sel.onchange = load;
+  load();
+}
+
+async function renderParentProgress(p) {
+  const root = clear($('#progress-root'));
+  const tests = p.attempts.filter(a => a.kind === 'test' && a.score !== null);
+  root.appendChild(subjectTiles(p.subjects, false));
+  if (!tests.length) {
+    root.appendChild(emptyState('No tests taken yet. Approve a chapter test and your child can start.'));
+    return;
+  }
+  const lineCanvas = h('canvas', { 'aria-label': 'Scores over time' });
+  const barCanvas = h('canvas', { 'aria-label': 'Average score by subject' });
+  root.appendChild(h('div', { class: 'grid gap-4 md:grid-cols-2' },
+    h('div', {}, h('h3', { class: 'font-semibold text-sm mb-1' }, 'Scores over time'), h('div', { class: 'chart-box' }, lineCanvas)),
+    h('div', {}, h('h3', { class: 'font-semibold text-sm mb-1' }, 'Average by subject'), h('div', { class: 'chart-box' }, barCanvas))));
+
+  const weak = h('div', { class: 'mt-4' }, h('h3', { class: 'font-semibold text-sm mb-1' }, '🎯 Needs more practice'));
+  if (p.weak.length) {
+    weak.appendChild(h('ul', { class: 'text-sm space-y-1' }, p.weak.map(w => h('li', {},
+      h('a', { class: 'link', href: `/chapter?id=${encodeURIComponent(w.chapter_id)}#test` }, `${w.subject} · ${w.title}`),
+      ` — ${w.score ?? '–'}%, ${w.wrong_count} wrong answer${w.wrong_count === 1 ? '' : 's'} to revise`))));
+  } else weak.appendChild(h('p', { class: 'text-sm text-slate-500' }, 'No weak areas right now. 👏'));
+  root.appendChild(weak);
+  root.appendChild(h('p', { class: 'text-sm mt-2' }, `🔁 Revision questions due now: ${p.revision_due}`));
+
+  const written = p.attempts.filter(a => a.written && a.written.length).slice(-5).reverse();
+  if (written.length) {
+    root.appendChild(h('details', { class: 'mt-4' },
+      h('summary', { class: 'cursor-pointer font-semibold text-sm' }, '📝 Recent written answers to check'),
+      written.map(a => h('div', { class: 'mt-2 text-sm' },
+        h('p', { class: 'font-medium' }, `${a.subject} · ${a.title} — ${fmtDate(a.created_at)}`),
+        h('ul', { class: 'pl-4 list-disc' }, a.written.map(w => h('li', {}, h('span', { class: 'text-slate-500' }, `${w.question} → `), w.answer)))))));
+  }
+
+  try {
+    await loadScript(CDN.chart);
+    drawChart('line', lineCanvas, {
+      type: 'line',
+      data: {
+        labels: tests.map(t => fmtDate(t.created_at)),
+        datasets: [{ label: 'Score %', data: tests.map(t => t.score), tension: .25, borderColor: '#1e3a8a', backgroundColor: '#1e3a8a' }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        scales: { y: { min: 0, max: 100 } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { title: items => `${tests[items[0].dataIndex].subject} · ${tests[items[0].dataIndex].title}` } } }
+      }
+    });
+    const subs = p.subjects.filter(s => s.average !== null);
+    drawChart('bar', barCanvas, {
+      type: 'bar',
+      data: { labels: subs.map(s => s.subject), datasets: [{ label: 'Average %', data: subs.map(s => s.average), backgroundColor: '#16a34a', maxBarThickness: 64 }] },
+      options: { maintainAspectRatio: false, scales: { y: { min: 0, max: 100 } }, plugins: { legend: { display: false } } }
+    });
+  } catch { /* charts are a bonus; the tiles above still show the numbers */ }
+}
+
+// ---------- Child ----------
+
+async function initChildProgress(childId) {
+  const panel = $('#progress-panel');
+  const byChapter = {};
+  try {
+    const p = await fetchProgress(childId, renderChildProgress);
+    p.chapters.forEach(c => { if (c.score !== null) byChapter[c.chapter_id] = c; });
+  } catch { if (panel) panel.classList.add('hidden'); }
+  return byChapter;
+}
+
+async function renderChildProgress(p) {
+  const panel = $('#progress-panel');
+  const root = clear($('#progress-root'));
+  panel.classList.remove('hidden');
+  root.appendChild(subjectTiles(p.subjects, true));
+  const subs = p.subjects.filter(s => s.average !== null);
+  if (!subs.length) {
+    root.appendChild(h('p', { class: 'text-sm text-slate-600' }, 'Finish a chapter test to earn your first stars! ⭐'));
+    return;
+  }
+  const canvas = h('canvas', { 'aria-label': 'My scores by subject' });
+  root.appendChild(h('div', { class: 'chart-box', style: 'height:180px' }, canvas));
+  try {
+    await loadScript(CDN.chart);
+    drawChart('child', canvas, {
+      type: 'bar',
+      data: { labels: subs.map(s => `${SUBJECT_ICON[s.subject] || ''} ${s.subject}`), datasets: [{ data: subs.map(s => s.average), backgroundColor: '#f59e0b', borderRadius: 6, maxBarThickness: 32 }] },
+      options: { maintainAspectRatio: false, indexAxis: 'y', scales: { x: { min: 0, max: 100 } }, plugins: { legend: { display: false } } }
+    });
+  } catch { /* tiles already show the numbers */ }
+}
+
+// ---------- Revision Round: wrong answers come back after a few days ----------
+
+async function initRevision() {
+  const panel = $('#revision-panel');
+  if (!panel) return;
+  let data;
+  try {
+    data = await apiFetch('/api/progress/revision', { silent: true });
+  } catch { return; }
+  const root = clear($('#revision-root'));
+  if (!data.items.length) {
+    if (data.upcoming) {
+      panel.classList.remove('hidden');
+      root.appendChild(h('p', { class: 'text-sm text-slate-600' },
+        `${data.upcoming} question${data.upcoming === 1 ? '' : 's'} to practise again from ${fmtDate(data.next_due)}. Keep going! 💪`));
+    } else panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  const form = h('form', { class: 'space-y-3' });
+  data.items.forEach((item, i) => {
+    const name = `rev-${i}`;
+    form.appendChild(h('div', { class: 'q-block', dataset: { qid: item.qid, chapter: item.chapter_id, i } },
+      h('p', { class: 'text-xs text-slate-500' }, `${item.subject} · ${item.chapter_title}`),
+      h('p', { class: 'font-medium mb-2' }, `${i + 1}. ${questionText(item)}`),
+      renderQuestionInput(item.type, item, name)));
+  });
+  const submit = h('button', { type: 'submit', class: 'btn-primary' }, 'Check revision answers');
+  form.appendChild(submit);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const answers = data.items.map((item, i) => ({ chapter_id: item.chapter_id, qid: item.qid, value: readAnswer(form, item.type, `rev-${i}`) }))
+      .filter(a => a.value !== undefined && a.value !== '');
+    if (!answers.length) { showToast('Answer at least one question', 'error'); return; }
+    setBusy(submit, true, 'Checking…');
+    try {
+      const res = await saveAndCache('/api/progress/revision', { answers });
+      submit.remove();
+      $$('input, textarea', form).forEach(el => { el.disabled = true; });
+      res.results.forEach(r => markResult($(`[data-qid="${r.qid}"][data-chapter="${r.chapter_id}"]`, form), r));
+      form.appendChild(h('div', { class: 'score-banner' }, h('p', { class: 'font-bold' }, `${res.correct} of ${res.total} right this time!`),
+        h('p', { class: 'text-sm' }, 'Correct ones are cleared. The rest come back in a few days.')));
+    } catch { setBusy(submit, false); }
+  });
+  root.append(h('p', { class: 'text-sm text-slate-600 mb-3' }, `Let's try these again (${data.due} due).`), form);
+}
+
+// =====================================================================
+// Phase 6 — Service worker (static shell only; /api is never cached there)
+// =====================================================================
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
+  navigator.serviceWorker.register('/sw.js').catch(() => { /* app works without it */ });
 }

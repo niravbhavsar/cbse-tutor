@@ -19,7 +19,13 @@
   </header>
 
   <main class="max-w-4xl mx-auto px-4 py-6 space-y-6">
-    <!-- @progress -->
+    <section id="progress-panel" class="card hidden" aria-labelledby="progress-title">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h2 id="progress-title" class="text-lg font-semibold">📊 Progress</h2>
+        <select id="progress-child" class="input text-sm"></select>
+      </div>
+      <div id="progress-root"></div>
+    </section>
 
     <section aria-labelledby="books-title">
       <h2 id="books-title" class="text-xl font-semibold mb-3">📚 Books &amp; chapters</h2>

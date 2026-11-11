@@ -1,0 +1,21 @@
+# Weekly backup Worker. Deploy from this folder:  npx wrangler deploy
+# Needs the SAME D1 database id as ../wrangler.toml and an R2 bucket
+# (R2 needs a payment method on file — see README).
+name = "cbse-tutor-backup"
+main = "index.js"
+compatibility_date = "2025-01-01"
+
+[triggers]
+crons = ["0 20 * * 0"]   # Sunday 20:00 UTC (Monday 01:30 IST)
+
+[[d1_databases]]
+binding = "DB"
+database_name = "app-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "BACKUP"
+bucket_name = "cbse-tutor-backup"
+
+# Optional: set a token to allow a manual run over HTTP
+#   npx wrangler secret put BACKUP_TOKEN
