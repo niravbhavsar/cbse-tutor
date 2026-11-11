@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parent dashboard — CBSE Personal Tutor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="parent" class="bg-slate-50 text-slate-800 min-h-screen">
+  <header class="bg-blue-900 text-white">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <h1 class="font-bold text-lg">👪 Parent dashboard</h1>
+      <div class="flex items-center gap-3 text-sm">
+        <span id="who" class="hidden sm:inline opacity-80"></span>
+        <button id="logout-btn" type="button" class="bg-white/15 hover:bg-white/25 rounded px-3 py-1">Log out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 py-6 space-y-6">
+    <!-- @progress -->
+
+    <section aria-labelledby="books-title">
+      <h2 id="books-title" class="text-xl font-semibold mb-3">📚 Books &amp; chapters</h2>
+      <div id="books-root"><p class="text-slate-400 text-sm">Loading…</p></div>
+    </section>
+
+    <section class="card" aria-labelledby="capture-title">
+      <h2 id="capture-title" class="text-lg font-semibold mb-1">📸 Add a book that isn't listed</h2>
+      <p class="text-sm text-slate-500 mb-3">Photograph the front cover and the contents page <strong>once</strong>. The chapters are saved to the cloud for every device.</p>
+      <form id="capture-form" class="grid gap-3 sm:grid-cols-3">
+        <label class="text-sm">Subject
+          <select name="subject" class="input w-full">
+            <option>English</option><option>Maths</option><option>EVS</option><option>Hindi</option>
+          </select>
+        </label>
+        <label class="text-sm">Front cover
+          <input type="file" name="cover" accept="image/*" capture="environment" class="input w-full" required>
+        </label>
+        <label class="text-sm">Contents / index page
+          <input type="file" name="index" accept="image/*" capture="environment" class="input w-full">
+        </label>
+        <button type="submit" class="btn-primary sm:col-span-3">Read photos</button>
+      </form>
+      <p id="capture-status" class="text-sm text-slate-500 mt-3" aria-live="polite"></p>
+      <div id="capture-review" class="mt-3"></div>
+    </section>
+
+    <section class="card" aria-labelledby="children-title">
+      <h2 id="children-title" class="text-lg font-semibold mb-2">🧒 Child accounts</h2>
+      <ul id="children-list" class="text-sm mb-4"></ul>
+      <form id="child-form" class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+        <input type="email" name="email" placeholder="Child login email (e.g. riya@home)" required class="input" autocomplete="off">
+        <input type="password" name="password" placeholder="Password (min 8)" minlength="8" required class="input" autocomplete="new-password">
+        <button type="submit" class="btn-primary">Add child</button>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="safety-title">
+      <h2 id="safety-title" class="text-lg font-semibold mb-1">🛡️ Data safety</h2>
+      <p class="text-sm text-slate-500 mb-3">Everything lives in the cloud database. Keep an occasional export on your own device too.</p>
+      <div class="flex flex-wrap gap-2">
+        <button id="export-btn" type="button" class="btn-secondary">⬇️ Export JSON</button>
+        <button id="import-btn" type="button" class="btn-secondary">⬆️ Import JSON</button>
+        <button id="backup-btn" type="button" class="btn-secondary">☁️ Back up to R2 now</button>
+        <input id="import-file" type="file" accept="application/json,.json" class="hidden">
+      </div>
+    </section>
+  </main>
+
+  <div id="toast-root" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

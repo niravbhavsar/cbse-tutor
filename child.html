@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My learning — CBSE Personal Tutor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="child" class="bg-amber-50 text-slate-800 min-h-screen">
+  <header class="bg-amber-500 text-white">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <h1 class="font-bold text-lg">🌟 My learning</h1>
+      <div class="flex items-center gap-3 text-sm">
+        <span id="who" class="hidden sm:inline opacity-90"></span>
+        <button id="logout-btn" type="button" class="bg-white/20 hover:bg-white/30 rounded px-3 py-1">Log out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 py-6 space-y-6">
+    <!-- @revision -->
+    <!-- @progress -->
+    <section aria-labelledby="books-title">
+      <h2 id="books-title" class="text-xl font-semibold mb-3">📚 My books</h2>
+      <div id="books-root"><p class="text-slate-400 text-sm">Loading…</p></div>
+    </section>
+  </main>
+
+  <div id="toast-root" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

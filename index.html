@@ -3,43 +3,50 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CBSE Personal Tutor</title>
+  <title>CBSE Personal Tutor — Log in</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen">
+<body data-page="login" class="bg-slate-50 text-slate-800 min-h-screen">
   <main class="max-w-md mx-auto px-4 py-10">
     <header class="text-center mb-8">
       <h1 class="text-3xl font-bold text-blue-900">CBSE Personal Tutor</h1>
       <p class="text-slate-500 mt-1">Capture once, learn forever.</p>
     </header>
 
-    <!-- Login form: wired up in Phase 1 (/api/login). Disabled until then. -->
-    <section class="bg-white rounded-xl shadow p-6 mb-6" aria-labelledby="login-title">
+    <section class="card mb-6" aria-labelledby="login-title">
       <h2 id="login-title" class="text-lg font-semibold mb-4">Log in</h2>
       <form id="login-form" class="space-y-3">
-        <input type="email" name="email" placeholder="Email" autocomplete="username" required disabled
-               class="w-full border rounded-lg px-3 py-2 bg-slate-100">
-        <input type="password" name="password" placeholder="Password" autocomplete="current-password" required disabled
-               class="w-full border rounded-lg px-3 py-2 bg-slate-100">
-        <button type="submit" disabled
-                class="w-full bg-blue-900 text-white rounded-lg py-2 opacity-50 cursor-not-allowed">Log in</button>
-        <p class="text-xs text-slate-400 text-center">Login arrives in Phase 1.</p>
+        <input type="email" name="email" placeholder="Email" autocomplete="username" required class="input w-full">
+        <input type="password" name="password" placeholder="Password" autocomplete="current-password" required class="input w-full">
+        <button type="submit" class="btn-primary w-full">Log in</button>
+      </form>
+      <p class="text-xs text-slate-500 mt-4 text-center">
+        Child accounts are created by the parent.
+        <button id="show-signup" type="button" class="link underline">First time? Create the parent account</button>
+      </p>
+    </section>
+
+    <section id="signup-card" class="card mb-6 hidden">
+      <form id="signup-form" class="space-y-3">
+        <h2 class="text-lg font-semibold">Create parent account</h2>
+        <p class="text-xs text-slate-500">Only works once — for the very first account on this app.</p>
+        <input type="email" name="email" placeholder="Parent email" autocomplete="username" required class="input w-full">
+        <input type="password" name="password" placeholder="Password (min 8 characters)" minlength="8" autocomplete="new-password" required class="input w-full">
+        <input type="password" name="password2" placeholder="Repeat password" minlength="8" autocomplete="new-password" required class="input w-full">
+        <button type="submit" class="btn-primary w-full">Create parent account</button>
       </form>
     </section>
 
-    <!-- Phase 0 deliverable check: worker + D1 health -->
-    <section class="bg-white rounded-xl shadow p-6" aria-labelledby="status-title">
-      <div class="flex items-center justify-between mb-3">
-        <h2 id="status-title" class="text-lg font-semibold">System status</h2>
-        <button id="ping-btn" type="button" class="text-sm text-blue-900 underline">Re-check</button>
-      </div>
-      <ul class="space-y-2 text-sm">
+    <!-- Phase 0 health panel kept for quick deploy checks -->
+    <details class="card text-sm">
+      <summary class="cursor-pointer font-semibold flex justify-between">System status <button id="ping-btn" type="button" class="link underline font-normal">Re-check</button></summary>
+      <ul class="space-y-2 mt-3">
         <li><span id="api-dot" class="status-dot"></span>API (<code>/api/ping</code>): <span id="api-status">checking…</span></li>
         <li><span id="db-dot" class="status-dot"></span>D1 tables: <span id="db-status">checking…</span></li>
         <li><span id="seed-dot" class="status-dot"></span>Seed (<code>books.json</code>): <span id="seed-status">checking…</span></li>
       </ul>
-    </section>
+    </details>
   </main>
 
   <div id="toast-root" aria-live="polite"></div>

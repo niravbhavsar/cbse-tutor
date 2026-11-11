@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapter — CBSE Personal Tutor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="chapter" class="bg-slate-50 text-slate-800 min-h-screen">
+  <header id="chapter-header" class="bg-blue-900 text-white">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <a id="back-link" href="/" class="text-sm opacity-90 hover:opacity-100">← Back</a>
+      <div class="flex items-center gap-3 text-sm">
+        <span id="who" class="hidden sm:inline opacity-80"></span>
+        <button id="logout-btn" type="button" class="bg-white/15 hover:bg-white/25 rounded px-3 py-1">Log out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 py-6 space-y-5">
+    <div>
+      <p id="chapter-book" class="text-sm text-slate-500"></p>
+      <h1 id="chapter-title" class="text-2xl font-bold">Loading…</h1>
+    </div>
+
+    <!-- Parent only: chapter text capture / correction -->
+    <section id="content-panel" class="card hidden" aria-labelledby="content-title">
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <h2 id="content-title" class="font-semibold">📄 Chapter text</h2>
+        <span id="content-badge" class="badge badge-muted"></span>
+      </div>
+      <div id="content-root"></div>
+    </section>
+
+    <!-- @tabs -->
+  </main>
+
+  <div id="toast-root" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

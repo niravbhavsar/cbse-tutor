@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS quiz_cache (
   approved INTEGER DEFAULT 0,
   answer_key_visible INTEGER DEFAULT 0,
   generated_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT,                 -- added: optimistic concurrency for quiz edits (8.3)
   FOREIGN KEY (chapter_id) REFERENCES chapters(id)
 );
 
@@ -62,3 +63,23 @@ CREATE TABLE IF NOT EXISTS progress (
   FOREIGN KEY (child_id) REFERENCES users(id),
   FOREIGN KEY (chapter_id) REFERENCES chapters(id)
 );
+
+-- Added beyond Section 5: progress keeps only the latest score per chapter,
+-- so every test attempt is also logged here to chart "scores over time"
+-- and to let the parent read written (short/long) answers.
+CREATE TABLE IF NOT EXISTS attempts (
+  id TEXT PRIMARY KEY,
+  child_id TEXT NOT NULL,
+  chapter_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'test',   -- 'test' | 'revision'
+  score INTEGER,
+  total INTEGER,
+  answers_json TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (child_id) REFERENCES users(id),
+  FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chapters_book ON chapters(book_id);
+CREATE INDEX IF NOT EXISTS idx_attempts_child ON attempts(child_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);

@@ -2,7 +2,7 @@
 // Also reports which D1 tables exist so the Phase 0 deliverable
 // ("D1 tables exist") can be verified from a browser without wrangler.
 
-const EXPECTED_TABLES = ['users', 'sessions', 'books', 'chapters', 'quiz_cache', 'progress'];
+const EXPECTED_TABLES = ['users', 'sessions', 'books', 'chapters', 'quiz_cache', 'progress', 'attempts'];
 
 export async function onRequestGet({ env }) {
   const body = { ok: true, time: new Date().toISOString() };
