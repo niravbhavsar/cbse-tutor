@@ -1,0 +1,291 @@
+[
+  {
+    "id": "g4-english-santoor",
+    "grade": 4,
+    "subject": "English",
+    "title": "Santoor",
+    "publisher": "NCERT",
+    "medium": "English",
+    "ncert_code": "desa1",
+    "chapters": [
+      {
+        "id": "g4-english-santoor-ch01",
+        "chapter_no": 1,
+        "title": "Together We Can"
+      },
+      {
+        "id": "g4-english-santoor-ch02",
+        "chapter_no": 2,
+        "title": "The Tinkling Bells"
+      },
+      {
+        "id": "g4-english-santoor-ch03",
+        "chapter_no": 3,
+        "title": "Be Smart, Be Safe"
+      },
+      {
+        "id": "g4-english-santoor-ch04",
+        "chapter_no": 4,
+        "title": "One Thing at a Time"
+      },
+      {
+        "id": "g4-english-santoor-ch05",
+        "chapter_no": 5,
+        "title": "The Old Stag"
+      },
+      {
+        "id": "g4-english-santoor-ch06",
+        "chapter_no": 6,
+        "title": "Braille"
+      },
+      {
+        "id": "g4-english-santoor-ch07",
+        "chapter_no": 7,
+        "title": "Fit Body, Fit Mind, Fit Nation"
+      },
+      {
+        "id": "g4-english-santoor-ch08",
+        "chapter_no": 8,
+        "title": "The Lagori Champions"
+      },
+      {
+        "id": "g4-english-santoor-ch09",
+        "chapter_no": 9,
+        "title": "Hekko"
+      },
+      {
+        "id": "g4-english-santoor-ch10",
+        "chapter_no": 10,
+        "title": "The Swing"
+      },
+      {
+        "id": "g4-english-santoor-ch11",
+        "chapter_no": 11,
+        "title": "A Journey to the Magical Mountains"
+      },
+      {
+        "id": "g4-english-santoor-ch12",
+        "chapter_no": 12,
+        "title": "Maheshwar"
+      }
+    ]
+  },
+  {
+    "id": "g4-maths-maths-mela",
+    "grade": 4,
+    "subject": "Maths",
+    "title": "Maths Mela",
+    "publisher": "NCERT",
+    "medium": "English",
+    "ncert_code": "demm1",
+    "chapters": [
+      {
+        "id": "g4-maths-maths-mela-ch01",
+        "chapter_no": 1,
+        "title": "Shapes Around Us"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch02",
+        "chapter_no": 2,
+        "title": "Hide and Seek"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch03",
+        "chapter_no": 3,
+        "title": "Pattern Around Us"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch04",
+        "chapter_no": 4,
+        "title": "Thousands Around Us"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch05",
+        "chapter_no": 5,
+        "title": "Sharing and Measuring"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch06",
+        "chapter_no": 6,
+        "title": "Measuring Length"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch07",
+        "chapter_no": 7,
+        "title": "The Cleanest Village"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch08",
+        "chapter_no": 8,
+        "title": "Weigh it, Pour it"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch09",
+        "chapter_no": 9,
+        "title": "Equal Groups"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch10",
+        "chapter_no": 10,
+        "title": "Elephants, Tigers, and Leopards"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch11",
+        "chapter_no": 11,
+        "title": "Fun with Symmetry"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch12",
+        "chapter_no": 12,
+        "title": "Ticking Clocks and Turning Calendar"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch13",
+        "chapter_no": 13,
+        "title": "The Transport Museum"
+      },
+      {
+        "id": "g4-maths-maths-mela-ch14",
+        "chapter_no": 14,
+        "title": "Data Handling"
+      }
+    ]
+  },
+  {
+    "id": "g4-evs-our-wondrous-world",
+    "grade": 4,
+    "subject": "EVS",
+    "title": "Our Wondrous World",
+    "publisher": "NCERT",
+    "medium": "English",
+    "ncert_code": "deev1",
+    "chapters": [
+      {
+        "id": "g4-evs-our-wondrous-world-ch01",
+        "chapter_no": 1,
+        "title": "Living Together"
+      },
+      {
+        "id": "g4-evs-our-wondrous-world-ch02",
+        "chapter_no": 2,
+        "title": "Exploring Our Neighbourhood"
+      },
+      {
+        "id": "g4-evs-our-wondrous-world-ch03",
+        "chapter_no": 3,
+        "title": "Nature Trail"
+      },
+      {
+        "id": "g4-evs-our-wondrous-world-ch04",
+        "chapter_no": 4,
+        "title": "Growing up with Nature"
+      },
+      {
+        "id": "g4-evs-our-wondrous-world-ch05",
+        "chapter_no": 5,
+        "title": "Food for Health"
+      },
+      {
+        "id": "g4-evs-our-wondrous-world-ch06",
+        "chapter_no": 6,
+        "title": "Happy and Healthy Living"
+      },
+      {
+        "id": "g4-evs-our-wondrous-world-ch07",
+        "chapter_no": 7,
+        "title": "How Things Work"
+      },
+      {
+        "id": "g4-evs-our-wondrous-world-ch08",
+        "chapter_no": 8,
+        "title": "How Things are Made"
+      },
+      {
+        "id": "g4-evs-our-wondrous-world-ch09",
+        "chapter_no": 9,
+        "title": "Different Lands, Different Lives"
+      },
+      {
+        "id": "g4-evs-our-wondrous-world-ch10",
+        "chapter_no": 10,
+        "title": "Our Sky"
+      }
+    ]
+  },
+  {
+    "id": "g4-hindi-veena",
+    "grade": 4,
+    "subject": "Hindi",
+    "title": "Veena (वीणा)",
+    "publisher": "NCERT",
+    "medium": "Hindi",
+    "ncert_code": null,
+    "chapters": [
+      {
+        "id": "g4-hindi-veena-ch01",
+        "chapter_no": 1,
+        "title": "चिड़िया का गीत"
+      },
+      {
+        "id": "g4-hindi-veena-ch02",
+        "chapter_no": 2,
+        "title": "बगीचे का घोंघा"
+      },
+      {
+        "id": "g4-hindi-veena-ch03",
+        "chapter_no": 3,
+        "title": "नीम"
+      },
+      {
+        "id": "g4-hindi-veena-ch04",
+        "chapter_no": 4,
+        "title": "हमारा आहार"
+      },
+      {
+        "id": "g4-hindi-veena-ch05",
+        "chapter_no": 5,
+        "title": "आसमान गिरा"
+      },
+      {
+        "id": "g4-hindi-veena-ch06",
+        "chapter_no": 6,
+        "title": "जयपुर से पत्र"
+      },
+      {
+        "id": "g4-hindi-veena-ch07",
+        "chapter_no": 7,
+        "title": "नकली हीरे"
+      },
+      {
+        "id": "g4-hindi-veena-ch08",
+        "chapter_no": 8,
+        "title": "ओणम के रंग"
+      },
+      {
+        "id": "g4-hindi-veena-ch09",
+        "chapter_no": 9,
+        "title": "मिठाइयों का सम्मेलन"
+      },
+      {
+        "id": "g4-hindi-veena-ch10",
+        "chapter_no": 10,
+        "title": "कैमरा"
+      },
+      {
+        "id": "g4-hindi-veena-ch11",
+        "chapter_no": 11,
+        "title": "कविता का कमाल"
+      },
+      {
+        "id": "g4-hindi-veena-ch12",
+        "chapter_no": 12,
+        "title": "शतरंज में मात"
+      },
+      {
+        "id": "g4-hindi-veena-ch13",
+        "chapter_no": 13,
+        "title": "हमारा आदित्य"
+      }
+    ]
+  }
+]

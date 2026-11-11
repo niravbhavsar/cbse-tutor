@@ -1,0 +1,50 @@
+/* Custom styles beyond Tailwind (CDN). Keep small. */
+
+:root {
+  --ok: #15803d;
+  --err: #b91c1c;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans Devanagari", sans-serif;
+}
+
+/* Toast — visible "Saved ✓ / Not saved ✗" feedback (Section 8.1) */
+#toast-root {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.toast {
+  min-width: 12rem;
+  max-width: 90vw;
+  padding: 0.6rem 1rem;
+  border-radius: 0.5rem;
+  color: #fff;
+  font-size: 0.95rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.toast.show { opacity: 1; }
+.toast-success { background: var(--ok); }
+.toast-error { background: var(--err); }
+.toast-info { background: #1e3a8a; }
+
+.status-dot {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 9999px;
+  background: #9ca3af;
+  margin-right: 0.4rem;
+}
+.status-dot.ok { background: var(--ok); }
+.status-dot.err { background: var(--err); }

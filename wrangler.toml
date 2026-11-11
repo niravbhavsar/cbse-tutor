@@ -1,0 +1,29 @@
+# Cloudflare Pages config (PROJECT.md Section 3 / Phase 0)
+# Static files are served as-is from the repo root — no build step.
+name = "cbse-tutor"
+pages_build_output_dir = "."
+compatibility_date = "2025-01-01"
+
+# D1 — single source of truth.
+# Create with:  wrangler d1 create app-db
+# then paste the printed database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "app-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# R2 — weekly backup target (used from Phase 6).
+# NOTE: Cloudflare asks for a payment method (card/PayPal) before R2 can be
+# enabled, even on the free tier. Kept commented so deploys never fail on a
+# missing bucket. Once the bucket exists, create it and uncomment:
+#   wrangler r2 bucket create cbse-tutor-backup
+# [[r2_buckets]]
+# binding = "BACKUP"
+# bucket_name = "cbse-tutor-backup"
+
+# Workers AI binding (used from Phase 2/3). Free tier, no extra setup.
+[ai]
+binding = "AI"
+
+[vars]
+GRADE = "4"
